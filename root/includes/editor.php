@@ -74,10 +74,16 @@ class editor
 	var $template_id = 0;
 
 	/**
-	* Store the  current action & most recent action to aid the uninstall building process
+	* Store the current action & most recent action to aid the uninstall building process
 	*/
 	var $last_action = array();
 	var $curr_action = array();
+
+	/**
+	* Process status information (in tandem with acp_mods->process_edits, install, uninstall)
+	*/
+	var $process_force = false;
+	var $process_success = true;
 
 	/**
 	* Constructor method
@@ -861,8 +867,7 @@ class editor_direct extends editor
 
 	function close_file($new_filename)
 	{
-		global $phpbb_root_path, $config, $mod_installed, $mod_uninstalled, $force_install;
-		global $db, $user;
+		global $phpbb_root_path, $config, $db, $user;
 
 		if (!is_dir($new_filename) && !file_exists(dirname($new_filename)))
 		{
@@ -879,7 +884,7 @@ class editor_direct extends editor
 			return sprintf($user->lang['WRITE_DIRECT_FAIL'], $new_filename);
 		}
 
-		if ($this->template_id && ($mod_installed || $mod_uninstalled || $force_install))
+		if ($this->template_id && ($this->process_success || $this->process_force))
 		{
 			update_database_template($new_filename, $this->template_id, $file_contents, $this->install_time);
 		}
@@ -1128,8 +1133,7 @@ class editor_ftp extends editor
 	*/
 	function close_file($new_filename)
 	{
-		global $phpbb_root_path, $edited_root, $mod_installed, $mod_uninstalled, $force_install;
-		global $db, $user;
+		global $phpbb_root_path, $db, $user;
 
 		if (!is_dir($new_filename) && !file_exists(dirname($new_filename)))
 		{
@@ -1141,7 +1145,7 @@ class editor_ftp extends editor
 
 		$file_contents = implode('', $this->file_contents);
 
-		if ($this->template_id && ($mod_installed || $mod_uninstalled || $force_install))
+		if ($this->template_id && ($this->process_success || $this->process_force))
 		{
 			update_database_template($new_filename, $this->template_id, $file_contents, $this->install_time);
 		}
@@ -1181,7 +1185,7 @@ class editor_ftp extends editor
 		return $this->copy_content($source, $destination);
 	}
 
-	function commit_changes_final($source, $destionation)
+	function commit_changes_final($source, $destination)
 	{
 		return NULL;
 	}
@@ -1353,12 +1357,11 @@ class editor_manual extends editor
 	*/
 	function close_file($new_filename)
 	{
-		global $phpbb_root_path, $edited_root, $mod_installed, $mod_uninstalled, $force_install;
-		global $db, $user;
+		global $phpbb_root_path, $db, $user;
 
 		$file_contents = implode('', $this->file_contents);
 
-		if ($this->template_id && ($mod_installed || $mod_uninstalled || $force_install))
+		if ($this->template_id && ($this->process_success || $this->process_force))
 		{
 			update_database_template($new_filename, $this->template_id, $file_contents, $this->install_time);
 		}

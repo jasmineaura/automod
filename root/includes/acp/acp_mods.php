@@ -29,6 +29,8 @@ class acp_mods
 	var $backup_root = '';
 	var $sort_key = '';
 	var $sort_dir = '';
+	var $process_force = false;
+	var $process_success = true;
 
 	function main($id, $mode)
 	{
@@ -270,12 +272,12 @@ class acp_mods
 				{
 					case 'pre_install':
 					case 'install':
-						$this->install($action, $mod_path, $parent);
+						$this->install($action, $mod_path, $parent, $config['preview_changes']);
 					break;
 
 					case 'pre_uninstall':
 					case 'uninstall':
-						$this->uninstall($action, $mod_id, $parent);
+						$this->uninstall($action, $mod_id, $parent, $config['preview_changes']);
 					break;
 
 					case 'details':
@@ -291,7 +293,7 @@ class acp_mods
 					case 'pre_upload_mod':
 					case 'upload_mod':
 					default:
-						$action = (isset($action)) ? $action : '';
+						$action = (isset($action)) ? $action : 'pre_upload_mod';
 						if (!$this->upload_mod($action))
 						{
 							$this->list_installed();
@@ -966,13 +968,12 @@ class acp_mods
 	* Install/pre-install a mod
 	* Preforms all Edits, Copies, and SQL queries
 	*/
-	function install($action, $mod_path, $parent = 0)
+	function install($action, $mod_path, $parent = 0, $preview_changes)
 	{
-		global $phpbb_root_path, $phpEx, $db, $template, $user, $config, $cache, $dest_template;
-		global $force_install, $mod_installed;
+		global $phpbb_root_path, $phpEx, $db, $template, $user, $cache;
 
 		// Are we forcing a template install?
-		$dest_template = $mod_contribs = $mod_language = '';
+		$dest_template = $mod_contribs = $mod_language = $dest_inherits = '';
 		if (isset($_POST['template_submit']))
 		{
 			if (!check_form_key('acp_mods'))
@@ -1095,8 +1096,6 @@ class acp_mods
 				WHERE template_path = '" . $db->sql_escape($dest_template) . "'";
 			$result = $db->sql_query($sql);
 
-			global $dest_inherits;
-			$dest_inherits = '';
 			if ($row = $db->sql_fetchrow($result))
 			{
 				$dest_inherits = $row['template_inherit_path'];
@@ -1134,6 +1133,11 @@ class acp_mods
 					}
 				}
 			}
+
+			// Passed on from pre_install & retry/force pages
+			$hidden_ary['dest'] = $dest_template;
+			$hidden_ary['source'] = $mod_path;
+			$hidden_ary['template_submit'] = true;
 		}
 
 		// only supporting one level of hierarchy here
@@ -1141,13 +1145,11 @@ class acp_mods
 		{
 			// check for "child" MODX files and attempt to decide which ones we need
 			$children = $this->find_children($mod_path);
-
 			$elements = array('language' => array(), 'template' => array());
 
 			if ($execute_edits)
 			{
-				global $mode;
-				$this->handle_dependency($children, $mode, $mod_path);
+				$this->handle_dependency($children, $mod_path);
 			}
 			$this->handle_language_prompt($children, $elements, $action);
 			$this->handle_merge('language', $actions, $children, $elements['language']);
@@ -1182,31 +1184,23 @@ class acp_mods
 		if ($execute_edits)
 		{
 			$editor->create_edited_root($this->edited_root);
-			$force_install = request_var('force', false);
+			$this->process_force = request_var('force', false);
 		}
 
-		$display = ($execute_edits || $config['preview_changes']) ? true : false;
-
 		// process the actions
-		$mod_installed = $this->process_edits($editor, $actions, $details, $execute_edits, $display, false);
+		$display = ($execute_edits || $preview_changes) ? true : false;
+		$this->process_edits($editor, $actions, $details, $execute_edits, $display, false, $dest_template, $dest_inherits);
 
 		if (!$execute_edits)
 		{
-			$s_hidden_fields = array('dependency_confirm'	=> !empty($_REQUEST['dependency_confirm']));
-
-			if ($dest_template)
-			{
-				$s_hidden_fields['dest'] = $dest_template;
-				$s_hidden_fields['source'] = $mod_path;
-				$s_hidden_fields['template_submit'] = true;
-			}
+			$hidden_ary['dependency_confirm'] = !empty($_REQUEST['dependency_confirm']);
 
 			if ($parent)
 			{
-				$s_hidden_fields['type'] = $modx_type;
+				$hidden_ary['type'] = $modx_type;
 			}
 
-			$template->assign_var('S_HIDDEN_FIELDS', build_hidden_fields($s_hidden_fields));
+			$template->assign_var('S_HIDDEN_FIELDS', build_hidden_fields($hidden_ary));
 			add_form_key('acp_mods');
 
 			return;
@@ -1237,14 +1231,14 @@ class acp_mods
 			));
 		}
 
-		if ($mod_installed || $force_install)
+		if ($this->process_success || $this->process_force)
 		{
 			// Move edited files back
 			$status = $editor->commit_changes($this->edited_root, '');
 
 			if (is_string($status))
 			{
-				$mod_installed = false;
+				$this->process_success = false;
 
 				$template->assign_block_vars('error', array(
 					'ERROR'	=> $status,
@@ -1258,7 +1252,7 @@ class acp_mods
 		$editor->clear_actions();
 
 		// if MOD installed successfully, make a record.
-		if (($mod_installed || $force_install) && !$parent)
+		if (($this->process_success || $this->process_force) && !$parent)
 		{
 			$mod_name = (is_array($details['MOD_NAME'])) ? serialize($details['MOD_NAME']) : $details['MOD_NAME'];
 
@@ -1289,7 +1283,7 @@ class acp_mods
 			add_log('admin', 'LOG_MOD_ADD', $mod_name);
 		}
 		// in this case, we are installing an additional template or language
-		else if (($mod_installed || $force_install) && $parent)
+		else if (($this->process_success || $this->process_force) && $parent)
 		{
 			$sql = 'SELECT * FROM ' . MODS_TABLE . " WHERE mod_id = $parent";
 			$result = $db->sql_query($sql);
@@ -1352,18 +1346,6 @@ class acp_mods
 		{
 			add_form_key('acp_mods');
 
-			if ($parent)
-			{
-				$hidden_ary['parent'] = $parent;
-			}
-
-			if ($dest_template)
-			{
-				$hidden_ary['dest'] = $dest_template;
-				$hidden_ary['source'] = $mod_path;
-				$hidden_ary['template_submit'] = true;
-			}
-
 			if ($mod_language || $mod_contribs)
 			{
 				$hidden_ary['type'] = $modx_type;
@@ -1372,17 +1354,17 @@ class acp_mods
 			$template->assign_vars(array(
 				'S_ERROR'			=> true,
 				'S_HIDDEN_FIELDS'	=> build_hidden_fields($hidden_ary),
-				'U_RETRY'			=> $this->u_action . '&amp;action=install&amp;mod_path=' . $mod_path,
+				'U_RETRY'	=> $this->u_action . "&amp;action=install&amp;mod_path=$mod_path" . ($parent ? "&amp;parent=$parent" : ''),
 			));
 		}
 
 		// if we forced the install of the MOD, we need to let the user know their board could be broken
-		if ($force_install)
+		if ($this->process_force)
 		{
 			$template->assign_var('S_FORCE', true);
 		}
 
-		if ($mod_installed || $force_install)
+		if ($this->process_success || $this->process_force)
 		{
 			// $editor->commit_changes_final don't do anything ATM, but to be compatible with future versions
 			$mod_name = localize_title($details['MOD_NAME'], 'en');
@@ -1393,10 +1375,9 @@ class acp_mods
 	/**
 	* Uninstall/pre uninstall a mod
 	*/
-	function uninstall($action, $mod_id, $parent)
+	function uninstall($action, $mod_id, $parent, $preview_changes)
 	{
-		global $phpbb_root_path, $phpEx, $db, $template, $user, $config;
-		global $force_install, $mod_uninstalled;
+		global $phpbb_root_path, $phpEx, $db, $template, $user;
 
 		if (!$mod_id && !$parent)
 		{
@@ -1494,10 +1475,8 @@ class acp_mods
 		if ($execute_edits)
 		{
 			$editor->create_edited_root($this->edited_root);
-			$force_install = $force_uninstall = request_var('force', false);
+			$this->process_force = request_var('force', false);
 		}
-
-		$display = ($execute_edits || $config['preview_changes']) ? true : false;
 
 		// cleanup edits if we forced the install on a contrib or language
 		if ($parent)
@@ -1521,28 +1500,29 @@ class acp_mods
 		}
 
 		// process the actions
-		$mod_uninstalled = $this->process_edits($editor, $actions, $details, $execute_edits, $display, true);
+		$display = ($execute_edits || $preview_changes) ? true : false;
+		$this->process_edits($editor, $actions, $details, $execute_edits, $display, true);
 
 		if (!$execute_edits)
 		{
 			return;
 		} // end pre_uninstall
 
-		if (($mod_uninstalled || $force_uninstall) && !$parent)
+		if (($this->process_success || $this->process_force) && !$parent)
 		{
 			// Move edited files back
 			$status = $editor->commit_changes($this->edited_root, '');
 
 			if (is_string($status))
 			{
-				$mod_uninstalled = false;
+				$this->process_success = false;
 
 				$template->assign_block_vars('error', array(
 					'ERROR'	=> $status,
 				));
 			}
 		}
-		elseif (($mod_uninstalled || $force_uninstall) && $parent)
+		elseif (($this->process_success || $this->process_force) && $parent)
 		{
 			// Only update the database entries and don't move any files back
 			$sql = 'SELECT * FROM ' . MODS_TABLE . " WHERE mod_id = $parent";
@@ -1613,11 +1593,11 @@ class acp_mods
 		}
 
 		// if we forced uninstall of the MOD, we need to let the user know their board could be broken
-		if ($force_uninstall)
+		if ($this->process_force)
 		{
 			$template->assign_var('S_FORCE_UNINSTALL', true);
 		}
-		else if (!$mod_uninstalled)
+		else if (!$this->process_success)
 		{
 			add_form_key('acp_mods');
 
@@ -1628,7 +1608,7 @@ class acp_mods
 			));
 		}
 
-		if ($mod_uninstalled || $force_uninstall)
+		if ($this->process_success || $this->process_force)
 		{
 			// Delete from DB
 			$sql = 'DELETE FROM ' . MODS_TABLE . '
@@ -1756,12 +1736,9 @@ class acp_mods
 		return $mods;
 	}
 
-	function process_edits($editor, $actions, $details, $change = false, $display = true, $reverse = false)
+	function process_edits($editor, $actions, $details, $change = false, $display = true, $reverse = false, $dest_template = '', $dest_inherits = '')
 	{
-		global $template, $user, $db, $phpbb_root_path, $force_install, $mod_installed;
-		global $dest_inherits, $dest_template, $children, $config;
-
-		$mod_installed = true;
+		global $template, $user, $db, $phpbb_root_path, $config;
 
 		if ($reverse)
 		{
@@ -1798,7 +1775,6 @@ class acp_mods
 		{
 			$template->assign_vars(array(
 				'S_AUTHOR_NOTES'	=> true,
-
 				'AUTHOR_NOTES'		=> nl2br($details['AUTHOR_NOTES']),
 			));
 		}
@@ -1821,7 +1797,7 @@ class acp_mods
 						'FILENAME'			=> $filename,
 					));
 
-					$mod_installed = ($is_inherit) ? $mod_installed : false;
+					$this->process_success = ($is_inherit) ? $this->process_success : false;
 
 					continue;
 				}
@@ -1837,6 +1813,8 @@ class acp_mods
 					// forced to direct when in preview modes, and ignored in editor_manual!
 					if ($change && !$reverse)
 					{
+						$editor->process_success = $this->process_success;
+						$editor->process_force = $this->process_force;
 						$status = $editor->open_file($filename, $this->backup_root);
 					}
 					else
@@ -1850,7 +1828,7 @@ class acp_mods
 							'ERROR'	=> $status,
 						));
 
-						$mod_installed = false;
+						$this->process_success = false;
 						continue;
 					}
 
@@ -1940,7 +1918,7 @@ class acp_mods
 													if (!$line)
 													{
 														// find failed
-														$status = $mod_installed = false;
+														$status = $this->process_success = false;
 
 														$inline_template_ary[] = array(
 															'FIND'		=>	array(
@@ -2011,7 +1989,7 @@ class acp_mods
 
 												if (!$status)
 												{
-													$mod_installed = false;
+													$this->process_success = false;
 												}
 
 												$editor->close_inline_edit();
@@ -2032,7 +2010,7 @@ class acp_mods
 								if (!$status)
 								{
 									$edit_success = false;
-									$mod_installed = false;
+									$this->process_success = false;
 								}
 
 								if (sizeof($inline_template_ary))
@@ -2077,7 +2055,7 @@ class acp_mods
 							'ERROR'	=> $status,
 						));
 
-						$mod_installed = false;
+						$this->process_success = false;
 					}
 				}
 			}
@@ -2106,13 +2084,13 @@ class acp_mods
 					prev($actions['NEW_FILES']);
 				}
 
-				if ($change && ($mod_installed || $force_install))
+				if ($change && ($this->process_success || $this->process_force))
 				{
 					$status = $editor->copy_content($this->mod_root . str_replace('*.*', '', $source), str_replace('*.*', '', $target));
 
 					if ($status !== true && !is_null($status))
 					{
-						$mod_installed = false;
+						$this->process_success = false;
 					}
 
 					$template->assign_block_vars('new_files', array(
@@ -2131,7 +2109,7 @@ class acp_mods
 					));
 				}
 				// To avoid "error" on install page when being asked to force install
-				else if ($change && $display && !$mod_installed && !$force_install)
+				else if ($change && $display && !$this->process_success && !$this->process_force)
 				{
 					$template->assign_block_vars('new_files', array(
 						'SOURCE'			=> $source,
@@ -2239,7 +2217,7 @@ class acp_mods
 									'FILENAME'				=> $file,
 								));
 							}
-							else if ($change && ($mod_installed || $force_install))
+							else if ($change && ($this->process_success || $this->process_force))
 							{
 								$status = $editor->remove($file);
 
@@ -2256,7 +2234,7 @@ class acp_mods
 								));
 							}
 							// To avoid "error" on uninstall page when being asked to force
-							else if ($change && $display && !$mod_installed && !$force_install)
+							else if ($change && $display && !$this->process_success && !$this->process_force)
 							{
 								$template->assign_block_vars('removing_files', array(
 									'S_NO_DELETE_ATTEMPT'	=> true,
@@ -2274,7 +2252,7 @@ class acp_mods
 							'FILENAME'				=> $target,
 						));
 					}
-					else if ($change && ($mod_installed || $force_install))
+					else if ($change && ($this->process_success || $this->process_force))
 					{
 						$status = $editor->remove($target);
 
@@ -2291,7 +2269,7 @@ class acp_mods
 						));
 					}
 					// To avoid "error" on uninstall page when being asked to force
-					else if ($change && $display && !$mod_installed && !$force_install)
+					else if ($change && $display && !$this->process_success && !$this->process_force)
 					{
 						$template->assign_block_vars('removing_files', array(
 							'S_NO_DELETE_ATTEMPT'	=> true,
@@ -2305,7 +2283,7 @@ class acp_mods
 				{
 					for ($i=0; $i < $cnt; $i++)
 					{
-						if ($change && ($mod_installed || $force_install))
+						if ($change && ($this->process_success || $this->process_force))
 						{
 							$status = $editor->remove($directories['del'][$i]);
 
@@ -2322,7 +2300,7 @@ class acp_mods
 							));
 						}
 						// To avoid "error" on uninstall page when being asked to force
-						else if ($change && $display && !$mod_installed && !$force_install)
+						else if ($change && $display && !$this->process_success && !$this->process_force)
 						{
 							$template->assign_block_vars('removing_files', array(
 								'S_NO_DELETE_ATTEMPT'	=> true,
@@ -2334,7 +2312,7 @@ class acp_mods
 				}
 			}
 			// Normal deleting functionality (not in reverse edits mode)
-			else if ($mod_installed || $force_install)
+			else if ($this->process_success || $this->process_force)
 			{
 				foreach ($actions['DELETE_FILES'] as $file)
 				{
@@ -2379,7 +2357,7 @@ class acp_mods
 		// Perform SQL queries last -- Queries usually cannot be done a second
 		// time, so do them only if the edits were successful.  Still complies
 		// with the MODX spec in this location
-		if (!empty($actions['SQL']) && ($mod_installed || $force_install || ($display && !$change)))
+		if (!empty($actions['SQL']) && ($this->process_success || $this->process_force || ($display && !$change)))
 		{
 			$template->assign_var('S_SQL', true);
 
@@ -2411,7 +2389,7 @@ class acp_mods
 							'ERROR_CODE'=> $error['code'],
 						));
 
-						$mod_installed = false;
+						$this->process_success = false;
 					}
 				}
 				else if ($display)
@@ -2429,7 +2407,7 @@ class acp_mods
 			$template->assign_var('S_SQL', false);
 		}
 
-		return $mod_installed;
+		return;
 	}
 
 	/**
@@ -2489,7 +2467,7 @@ class acp_mods
 		return $children;
 	}
 
-	function handle_dependency(&$children, $mode, $mod_path)
+	function handle_dependency(&$children, $mod_path)
 	{
 		if (isset($children['dependency']) && sizeof($children['dependency']))
 		{
@@ -2514,7 +2492,7 @@ class acp_mods
 
 				confirm_box(false, $message, build_hidden_fields(array(
 						'dependency_confirm'	=> true,
-						'mode'		=> $mode,
+						'mode'		=> request_var('mode', 'frontend'),
 						'action'	=> 'install',
 						'mod_path'	=> $mod_path,
 				)));
@@ -2772,7 +2750,7 @@ class acp_mods
 		$can_upload = (@ini_get('file_uploads') == '0' || strtolower(@ini_get('file_uploads')) == 'off' || !@extension_loaded('zlib')) ? false : true;
 
 		// get FTP information if we need it
-		$hidden_ary = get_connection_info(false);
+		$hidden_ary = get_connection_info($action != 'upload_mod');
 
 		if (!isset($_FILES['modupload']) || $action != 'upload_mod')
 		{
@@ -2918,7 +2896,7 @@ class acp_mods
 		}
 
 		// get FTP information if we need it
-		$hidden_ary = get_connection_info(false);
+		$hidden_ary = get_connection_info($action != 'delete_mod');
 
 		$hidden_ary['mod_delete'] = $mod_path;
 
