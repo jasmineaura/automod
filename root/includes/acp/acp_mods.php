@@ -1808,13 +1808,10 @@ class acp_mods
 						'FILENAME'	=> $filename,
 					));
 
-					// If installing - not pre_install nor (pre_)uninstall, backup the file
-					// This is to make sure it works with editor_ftp because write_method is
-					// forced to direct when in preview modes, and ignored in editor_manual!
+					// Open the file to edit, and if installing, backup it up first
+					// note: write_method is always forced to direct in preview mode.
 					if ($change && !$reverse)
 					{
-						$editor->process_success = $this->process_success;
-						$editor->process_force = $this->process_force;
 						$status = $editor->open_file($filename, $this->backup_root);
 					}
 					else
@@ -1922,9 +1919,7 @@ class acp_mods
 
 														$inline_template_ary[] = array(
 															'FIND'		=>	array(
-
 																'S_SUCCESS'	=> $status,
-
 																'NAME'		=> $user->lang[$type],
 																'COMMAND'	=> htmlspecialchars($inline_find),
 															),
@@ -1969,27 +1964,24 @@ class acp_mods
 
 													$inline_template_ary[] = array(
 														'FIND'		=>	array(
-
 															'S_SUCCESS'	=> $status,
-
 															'NAME'		=> $user->lang[$type],
 															'COMMAND'	=> (is_array($contents_orig)) ? $user->lang['INVALID_MOD_INSTRUCTION'] : htmlspecialchars($contents_orig),
 														),
 
 														'ACTION'	=> array(
-
 															'S_SUCCESS'	=> $status,
-
 															'NAME'		=> $user->lang[$inline_action],
 															'COMMAND'	=> (is_array($inline_contents)) ? $user->lang['INVALID_MOD_INSTRUCTION'] : htmlspecialchars($inline_contents),
-											//				'COMMENT'	=> $inline_comment, (inline comments aren't actually part of the MODX spec)
+															//'COMMENT'	=> $inline_comment, (inline comments aren't actually part of the MODX spec)
 														),
 													);
-												}
 
-												if (!$status)
-												{
-													$this->process_success = false;
+													if (!$status)
+													{
+														// inline_action failed
+														$edit_success = $this->process_success = false;
+													}
 												}
 
 												$editor->close_inline_edit();
@@ -2009,8 +2001,7 @@ class acp_mods
 
 								if (!$status)
 								{
-									$edit_success = false;
-									$this->process_success = false;
+									$edit_success = $this->process_success = false;
 								}
 
 								if (sizeof($inline_template_ary))
@@ -2030,7 +2021,6 @@ class acp_mods
 								{
 									$template->assign_block_vars('edit_files.finds.actions', array(
 										'S_SUCCESS'	=> $status,
-
 										'NAME'		=> $user->lang[$type],
 										'COMMAND'	=> htmlspecialchars($contents_orig),
 									));
@@ -2048,7 +2038,7 @@ class acp_mods
 
 				if ($change)
 				{
-					$status = $editor->close_file("{$this->edited_root}$filename");
+					$status = $editor->close_file("{$this->edited_root}$filename", $this->process_success, $this->process_force);
 					if (is_string($status))
 					{
 						$template->assign_block_vars('error', array(

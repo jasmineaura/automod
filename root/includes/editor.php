@@ -80,12 +80,6 @@ class editor
 	var $curr_action = array();
 
 	/**
-	* Process status information (in tandem with acp_mods->process_edits, install, uninstall)
-	*/
-	var $process_force = false;
-	var $process_success = true;
-
-	/**
 	* Constructor method
 	* This is not called directly in AutoMOD
 	*/
@@ -865,7 +859,7 @@ class editor_direct extends editor
 		return true;
 	}
 
-	function close_file($new_filename)
+	function close_file($new_filename, $process_success = false, $process_force = false)
 	{
 		global $phpbb_root_path, $config, $db, $user;
 
@@ -884,7 +878,7 @@ class editor_direct extends editor
 			return sprintf($user->lang['WRITE_DIRECT_FAIL'], $new_filename);
 		}
 
-		if ($this->template_id && ($this->process_success || $this->process_force))
+		if ($this->template_id && ($process_success || $process_force))
 		{
 			update_database_template($new_filename, $this->template_id, $file_contents, $this->install_time);
 		}
@@ -1131,7 +1125,7 @@ class editor_ftp extends editor
 	/**
 	* Write & close file
 	*/
-	function close_file($new_filename)
+	function close_file($new_filename, $process_success = false, $process_force = false)
 	{
 		global $phpbb_root_path, $db, $user;
 
@@ -1145,7 +1139,7 @@ class editor_ftp extends editor
 
 		$file_contents = implode('', $this->file_contents);
 
-		if ($this->template_id && ($this->process_success || $this->process_force))
+		if ($this->template_id && ($process_success || $process_force))
 		{
 			update_database_template($new_filename, $this->template_id, $file_contents, $this->install_time);
 		}
@@ -1355,13 +1349,13 @@ class editor_manual extends editor
 	/**
 	* Write & close file
 	*/
-	function close_file($new_filename)
+	function close_file($new_filename, $process_success = false, $process_force = false)
 	{
 		global $phpbb_root_path, $db, $user;
 
 		$file_contents = implode('', $this->file_contents);
 
-		if ($this->template_id && ($this->process_success || $this->process_force))
+		if ($this->template_id && ($process_success || $process_force))
 		{
 			update_database_template($new_filename, $this->template_id, $file_contents, $this->install_time);
 		}
