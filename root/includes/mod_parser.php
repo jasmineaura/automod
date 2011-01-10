@@ -146,7 +146,7 @@ class parser
 	*/
 	function reverse_edits($actions)
 	{
-		$reverse_edits = array();
+		$reverse_edits = array('EDITS' => array(), 'DELETE_FILES' => array(), 'SQL' => array());
 
 		if (!empty($actions['EDITS']))
 		{
@@ -237,10 +237,7 @@ class parser
 
 		if (!empty($actions['NEW_FILES']))
 		{
-			foreach ($actions['NEW_FILES'] as $source => $target)
-			{
-				$reverse_edits['DELETE_FILES'][$source] = $target;
-			}
+			$reverse_edits['DELETE_FILES'] = $actions['NEW_FILES'];
 		}
 
 		if (empty($actions['SQL']))
@@ -487,12 +484,11 @@ class parser_xml
 	{
 		global $db, $user;
 
-		$actions = array();
+		$actions = array('EDITS' => array(), 'NEW_FILES' => array(), 'DELETE_FILES' => array(), 'SQL' => array());
 
 		$xml_actions = $this->data[0]['children']['ACTION-GROUP'][0]['children'];
 
 		// sql
-		$actions['SQL'] = array();
 		$sql_info = (!empty($xml_actions['SQL'])) ? $xml_actions['SQL'] : array();
 
 		$match_dbms = array();
@@ -783,7 +779,7 @@ class parser_xml
 
 		if (!empty($xml_actions['DIY-INSTRUCTIONS']))
 		{
-			$actions['DIY_INSTRUCTIONS'] = localise_tags($xml_actions, 'DIY-INSTRUCTIONS');
+			$actions['DIY_INSTRUCTIONS'][] = localise_tags($xml_actions, 'DIY-INSTRUCTIONS');
 		}
 
 		return $actions;
