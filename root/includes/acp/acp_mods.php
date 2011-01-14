@@ -29,14 +29,16 @@ class acp_mods
 	var $backup_root = '';
 	var $sort_key = '';
 	var $sort_dir = '';
+	var $rev_actions = array();
 	var $process_force = false;
 	var $process_success = true;
+	var $connection = array('method' => 'ftp', 'test' => false, 'result' => true);
 
 	function main($id, $mode)
 	{
 		global $config, $db, $user, $auth, $template, $cache;
 		global $phpbb_root_path, $phpEx;
-		global $ftp_method, $test_ftp_connection, $test_connection, $sort_key, $sort_dir;
+		global $sort_key, $sort_dir;
 
 		include("{$phpbb_root_path}includes/functions_transfer.$phpEx");
 		include("{$phpbb_root_path}includes/editor.$phpEx");
@@ -55,7 +57,6 @@ class acp_mods
 		$action = request_var('action', '');
 		$mod_id = request_var('mod_id', 0);
 		$mod_url = request_var('mod_url', '');
-		$parent = request_var('parent', 0);
 
 		//sort keys
 		$sort_key = request_var('sk','t');
@@ -97,17 +98,7 @@ class acp_mods
 		switch ($mode)
 		{
 			case 'config':
-				$ftp_method		= request_var('ftp_method', $config['ftp_method']);
-				if (!$ftp_method || !class_exists($ftp_method))
-				{
-					$ftp_method = 'ftp';
-					$ftp_methods = transfer::methods();
-
-					if (!in_array('ftp', $ftp_methods))
-					{
-						$ftp_method = $ftp_methods[0];
-					}
-				}
+				$ftp_method = get_ftp_method($config['ftp_method']);
 
 				if (isset($_POST['submit']) && check_form_key('acp_mods'))
 				{
@@ -135,23 +126,13 @@ class acp_mods
 					}
 					else if ($write_method == WRITE_FTP)
 					{
-						// check the correctness of FTP infos
-						$test_ftp_connection = true;
-						$test_connection = false;
-						test_ftp_connection($ftp_method, $test_ftp_connection, $test_connection);
-
-						if ($test_connection !== true)
-						{
-							$error = $test_connection;
-						}
+						$conn_result = test_connection($ftp_method);
+						$error = ($conn_result !== true) ? $conn_result : '';
 					}
 					else if ($write_method == WRITE_MANUAL)
 					{
 						// the compress class requires write access to the store/ dir
-						if (!is_writable($this->store_dir))
-						{
-							$error = 'STORE_NOT_WRITABLE';
-						}
+						$error = (!is_writable($this->store_dir)) ? 'STORE_NOT_WRITABLE' : '';
 					}
 
 					if (empty($error))
@@ -204,14 +185,14 @@ class acp_mods
 				}
 
 				$template->assign_vars(array(
-					'S_CONFIG'			=> true,
-					'U_CONFIG'			=> $this->u_action . '&amp;mode=config',
+					'S_CONFIG'				=> true,
+					'U_CONFIG'				=> $this->u_action . '&amp;mode=config',
 
-					'UPLOAD_METHOD_FTP'	=> ($config['ftp_method'] == 'ftp') ? ' checked="checked"' : '',
-					'UPLOAD_METHOD_FSOCK'=> ($config['ftp_method'] == 'ftp_fsock') ? ' checked="checked"' : '',
-					'WRITE_DIRECT'		=> ($config['write_method'] == WRITE_DIRECT) ? ' checked="checked"' : '',
-					'WRITE_FTP'			=> ($config['write_method'] == WRITE_FTP) ? ' checked="checked"' : '',
-					'WRITE_MANUAL'		=> ($config['write_method'] == WRITE_MANUAL) ? ' checked="checked"' : '',
+					'UPLOAD_METHOD_FTP'		=> ($config['ftp_method'] == 'ftp') ? ' checked="checked"' : '',
+					'UPLOAD_METHOD_FSOCK'	=> ($config['ftp_method'] == 'ftp_fsock') ? ' checked="checked"' : '',
+					'WRITE_DIRECT'			=> ($config['write_method'] == WRITE_DIRECT) ? ' checked="checked"' : '',
+					'WRITE_FTP'				=> ($config['write_method'] == WRITE_FTP) ? ' checked="checked"' : '',
+					'WRITE_MANUAL'			=> ($config['write_method'] == WRITE_MANUAL) ? ' checked="checked"' : '',
 
 					'WRITE_METHOD_DIRECT'	=> WRITE_DIRECT,
 					'WRITE_METHOD_FTP'		=> WRITE_FTP,
@@ -230,28 +211,18 @@ class acp_mods
 			case 'frontend':
 				if ($config['write_method'] == WRITE_FTP)
 				{
-					$ftp_method = basename(request_var('method', $config['ftp_method']));
-					if (!$ftp_method || !class_exists($ftp_method))
+					$this->connection['method'] = get_ftp_method($config['ftp_method']);
+					$this->connection['test'] = request_var('test_connection', false);
+
+					if ($this->connection['test'] || in_array($action, array('install', 'uninstall', 'upload_mod', 'delete_mod')))
 					{
-						$ftp_method = 'ftp';
-						$ftp_methods = transfer::methods();
+						$this->connection['result'] = test_connection($this->connection['method']);
 
-						if (!in_array('ftp', $ftp_methods))
-						{
-							$ftp_method = $ftp_methods[0];
-						}
-					}
-
-					$test_connection = false;
-					$test_ftp_connection = request_var('test_connection', '');
-					if (!empty($test_ftp_connection) || in_array($action, array('install', 'uninstall', 'upload_mod', 'delete_mod')))
-					{
-						test_ftp_connection($ftp_method, $test_ftp_connection, $test_connection);
-
-						// Make sure the login details are correct before continuing
-						if ($test_connection !== true || !empty($test_ftp_connection))
+						// If testing requested, or if the connection failed, stay in preview/test mode
+						if ($this->connection['test'] || $this->connection['result'] !== true)
 						{
 								$action = 'pre_' . $action;
+								$this->connection['test'] = true;
 						}
 					}
 				}
@@ -272,6 +243,7 @@ class acp_mods
 				{
 					case 'pre_install':
 					case 'install':
+						$parent = request_var('parent', 0);
 						$this->install($action, $mod_path, $parent, $config['preview_changes']);
 					break;
 
@@ -419,7 +391,7 @@ class acp_mods
 	*/
 	function list_uninstalled()
 	{
-		global $phpbb_root_path, $db, $template, $config, $user;
+		global $db, $template, $config, $user;
 
 		// get available MOD paths
 		$available_mods = $this->find_mods($this->mods_dir, 1);
@@ -561,19 +533,15 @@ class acp_mods
 	/**
 	* Returns array of mod information
 	*/
-	function mod_details($mod_ident, $find_children = true, $uninstall = false)
+	function mod_details($mod_ident, $find_children = true, $uninstall = false, $parent = 0)
 	{
-		global $phpbb_root_path, $phpEx, $user, $template, $parent_id;
+		global $db, $user, $template;
 
 		if (is_int($mod_ident))
 		{
-			global $db, $user;
-
-			$mod_id = (int) $mod_ident;
-
 			$sql = 'SELECT *
 				FROM ' . MODS_TABLE . "
-					WHERE mod_id = $mod_id";
+					WHERE mod_id = $mod_ident";
 			$result = $db->sql_query($sql);
 			if ($row = $db->sql_fetchrow($result))
 			{
@@ -606,7 +574,6 @@ class acp_mods
 				// Obviously, the files must not have been removed for this to work.
 				if (($find_children || $uninstall) && file_exists($row['mod_path']))
 				{
-					$parent_id = $mod_id;
 					$mod_path = $row['mod_path'];
 
 					$actions = array();
@@ -626,8 +593,8 @@ class acp_mods
 
 					if (!$uninstall)
 					{
-						$this->handle_contrib($children);
-						$this->handle_language_prompt($children, $elements, 'details');
+						$this->handle_contrib($children, $mod_ident);
+						$this->handle_language_prompt($children, $elements, 'details', $mod_ident);
 						$this->handle_template_prompt($children, $elements, 'details');
 
 						// Now offer to install additional templates
@@ -662,16 +629,12 @@ class acp_mods
 							}
 						}
 					}
-					else
+					else if (isset($children['uninstall']) && sizeof($children['uninstall']))
 					{
-						if (isset($children['uninstall']) && sizeof($children['uninstall']))
-						{
-							// Override already exising actions with the ones
-							global $rev_actions;
-                            $xml_file = $mod_dir . '/' . ltrim($children['uninstall'][0]['href'], './');
-							$this->parser->set_file($xml_file);
-							$rev_actions = $this->parser->get_actions();
-						}
+						// Override already exising actions with the ones
+						$xml_file = $mod_dir . '/' . ltrim($children['uninstall'][0]['href'], './');
+						$this->parser->set_file($xml_file);
+						$this->rev_actions = $this->parser->get_actions();
 					}
 
 					if (!$found_prosilver)
@@ -700,7 +663,7 @@ class acp_mods
 
 					$s_hidden_fields = build_hidden_fields(array(
 						'action'	=> ($uninstall) ? 'uninstall' : 'pre_install',
-						'parent'	=> $parent_id,
+						'parent'	=> $mod_ident,
 					));
 
 					$template->assign_vars(array(
@@ -719,13 +682,11 @@ class acp_mods
 		}
 		else
 		{
-			$parent = request_var('parent', 0);
-			if ($parent)
+			if ($parent && is_int($parent))
 			{
-				global $db;
 				// reset the class parameters to refelect the proper directory
 				$sql = 'SELECT mod_path FROM ' . MODS_TABLE . '
-					WHERE mod_id = ' . (int) $parent;
+					WHERE mod_id = ' . $parent;
 				$result = $db->sql_query($sql);
 
 				if ($row = $db->sql_fetchrow($result))
@@ -775,12 +736,10 @@ class acp_mods
 	*/
 	function mod_actions($mod_ident)
 	{
-		global $phpbb_root_path, $phpEx;
+		global $db, $user;
 
 		if (is_int($mod_ident))
 		{
-			global $db, $user;
-
 			$sql = 'SELECT mod_actions, mod_name
 				FROM ' . MODS_TABLE . "
 					WHERE mod_id = $mod_ident";
@@ -960,7 +919,7 @@ class acp_mods
 	*/
 	function install($action, $mod_path, $parent = 0, $preview_changes)
 	{
-		global $phpbb_root_path, $phpEx, $db, $template, $user, $cache;
+		global $phpbb_root_path, $db, $template, $user, $cache;
 
 		// Are we forcing a template install?
 		$dest_template = $mod_contribs = $mod_language = $dest_inherits = '';
@@ -996,7 +955,7 @@ class acp_mods
 		$editor = new $write_method();
 
 		// get FTP information if we need it (or initialize array $hidden_ary)
-		$hidden_ary = get_connection_info(!$execute_edits);
+		$hidden_ary = get_connection_info(!$execute_edits, $this->connection);
 
 		// grab actions and details
 		$details = $this->mod_details($mod_path, false);
@@ -1325,7 +1284,7 @@ class acp_mods
 	*/
 	function uninstall($action, $mod_id, $parent, $preview_changes)
 	{
-		global $phpbb_root_path, $phpEx, $db, $template, $user;
+		global $phpbb_root_path, $db, $template, $user;
 
 		if (!$mod_id && !$parent)
 		{
@@ -1389,7 +1348,7 @@ class acp_mods
 		$editor = new $write_method();
 
 		// get FTP information if we need it (or initialize array $hidden_ary)
-		$hidden_ary = get_connection_info(!$execute_edits);
+		$hidden_ary = get_connection_info(!$execute_edits, $this->connection);
 
 		if ($parent)
 		{
@@ -1690,17 +1649,15 @@ class acp_mods
 
 		if ($reverse)
 		{
-			global $rev_actions;
-
-			if (empty($rev_actions))
+			if (empty($this->rev_actions))
 			{
 				// maybe should allow for potential extensions here
 				$actions = parser::reverse_edits($actions);
 			}
 			else
 			{
-				$actions = $rev_actions;
-				unset($rev_actions);
+				$actions = $this->rev_actions;
+				$this->rev_actions = array();
 			}
 		}
 
@@ -2441,16 +2398,17 @@ class acp_mods
 		return($ary);
 	}
 
-	function handle_contrib(&$children)
+	function handle_contrib(&$children, $parent = 0)
 	{
-		global $template, $parent_id, $phpbb_root_path, $user, $db;
+		global $template, $phpbb_root_path, $user, $db;
 
 		if (isset($children['contrib']) && sizeof($children['contrib']))
 		{
 			$template->assign_var('S_CONTRIB_AVAILABLE', true);
 
-			// Do we have links in the users selected language.
-			// Start with getting the Enlgish links.
+			/* Do we have links in the users selected language.
+			 * Start with getting the English links.
+			 */
 			$contrib_en = $this->get_contrib_lang($children['contrib']);
 
 			if ($user->data['user_lang'] == 'en' || sizeof($contrib_en) == sizeof($children['contrib']))
@@ -2474,11 +2432,11 @@ class acp_mods
 				}
 			}
 
-			if (!empty($parent_id))
+			if ($parent)
 			{
 				// get installed contribs from the database
 				$sql = 'SELECT mod_contribs FROM ' . MODS_TABLE . '
-						WHERE mod_id = ' . $parent_id;
+						WHERE mod_id = ' . $parent;
 				$result = $db->sql_query($sql);
 				$mod_contribs = $db->sql_fetchfield('mod_contribs');
 				$db->sql_freeresult();
@@ -2497,14 +2455,15 @@ class acp_mods
 				// don't do the urlencode until after the file is looked up on the
 				// filesystem
 				$xml_file = urlencode('/' . $xml_file);
+				$child_details['U_INSTALL'] = ($parent) ? $this->u_action . "&amp;action=pre_install&amp;parent=$parent&amp;mod_path=$xml_file" : '';
 
 				if (in_array(urldecode($xml_file), $mod_contribs))
 				{
-					$child_details['U_UNINSTALL']  = ($parent_id) ? $this->u_action . "&amp;action=pre_uninstall&amp;parent=$parent_id&amp;mod_path=$xml_file&amp;type=contrib" : '';
+					$child_details['U_UNINSTALL']  = ($parent) ? $this->u_action . "&amp;action=pre_uninstall&amp;parent=$parent&amp;mod_path=$xml_file&amp;type=contrib" : '';
 				}
 				else
 				{
-					$child_details['U_INSTALL'] = ($parent_id) ? $this->u_action . "&amp;action=pre_install&amp;parent=$parent_id&amp;mod_path=$xml_file&amp;type=contrib" : '';
+					$child_details['U_INSTALL'] = ($parent) ? $this->u_action . "&amp;action=pre_install&amp;parent=$parent&amp;mod_path=$xml_file&amp;type=contrib" : '';
 				}
 
 				$child_details['MOD_NAME'] = localize_title($child_details['MOD_NAME'], $user->data['user_lang']);
@@ -2569,9 +2528,9 @@ class acp_mods
 		}
 	}
 
-	function handle_language_prompt(&$children, &$elements, $action)
+	function handle_language_prompt(&$children, &$elements, $action, $parent = 0)
 	{
-		global $db, $template, $parent_id, $phpbb_root_path;
+		global $db, $template, $phpbb_root_path;
 
 		if (isset($children['language']) && sizeof($children['language']))
 		{
@@ -2601,11 +2560,11 @@ class acp_mods
 			// Inform the user if there are languages provided for by the MOD
 			if (sizeof($children['language']))
 			{
-				if (!empty($parent_id))
+				if ($parent)
 				{
 					// get installed languages from the database
 					$sql = 'SELECT mod_languages FROM ' . MODS_TABLE . '
-							WHERE mod_id = ' . $parent_id;
+							WHERE mod_id = ' . $parent;
 					$result = $db->sql_query($sql);
 					$mod_languages = $db->sql_fetchfield('mod_languages');
 					$db->sql_freeresult();
@@ -2624,8 +2583,8 @@ class acp_mods
 					$template->assign_block_vars('unknown_lang', array(
 						'ENGLISH_NAME'	=> $row['title'],
 						'LOCAL_NAME'	=> $row['realname'],
-						'U_INSTALL'		=> (!empty($xml_file) && !in_array($row['href'], $mod_languages) && $parent_id) ? $this->u_action . "&amp;action=pre_install&amp;parent=$parent_id&amp;mod_path=$xml_file&amp;type=lang" : '',
-						'U_UNINSTALL'		=> (!empty($xml_file) && $parent_id) ? $this->u_action . "&amp;action=pre_uninstall&amp;parent=$parent_id&amp;mod_path=$xml_file&amp;type=lang" : '',
+						'U_INSTALL'		=> (!empty($xml_file) && !in_array($row['href'], $mod_languages) && $parent) ? $this->u_action . "&amp;action=pre_install&amp;parent=$parent&amp;mod_path=$xml_file&amp;type=lang" : '',
+						'U_UNINSTALL'		=> (!empty($xml_file) && $parent) ? $this->u_action . "&amp;action=pre_uninstall&amp;parent=$parent&amp;mod_path=$xml_file&amp;type=lang" : '',
 					));
 					unset($row);
 				}
@@ -2637,7 +2596,7 @@ class acp_mods
 
 	function handle_template_prompt(&$children, &$elements, $action)
 	{
-		global $db, $template, $phpbb_root_path, $parent_id;
+		global $db;
 
 		if (isset($children['template']) && sizeof($children['template']))
 		{
@@ -2672,7 +2631,7 @@ class acp_mods
 		$can_upload = (@ini_get('file_uploads') == '0' || strtolower(@ini_get('file_uploads')) == 'off' || !@extension_loaded('zlib')) ? false : true;
 
 		// get FTP information if we need it
-		$hidden_ary = get_connection_info($action != 'upload_mod');
+		$hidden_ary = get_connection_info($action != 'upload_mod', $this->connection);
 
 		if (!isset($_FILES['modupload']) || $action != 'upload_mod')
 		{
@@ -2818,7 +2777,7 @@ class acp_mods
 		}
 
 		// get FTP information if we need it
-		$hidden_ary = get_connection_info($action != 'delete_mod');
+		$hidden_ary = get_connection_info($action != 'delete_mod', $this->connection);
 
 		$hidden_ary['mod_delete'] = $mod_path;
 
