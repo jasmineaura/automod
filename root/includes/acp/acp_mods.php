@@ -461,7 +461,7 @@ class acp_mods
 				'MOD_PATH'	=> $short_path,
 
 				'PHPBB_VERSION'		=> $details['PHPBB_VERSION'],
-				'S_PHPBB_VESION'	=> ($details['PHPBB_VERSION'] != $config['version']) ? true : false,
+				'S_PHPBB_VERSION'	=> ($details['PHPBB_VERSION'] != $config['version']) ? true : false,
 
 				'U_INSTALL'	=> $this->u_action . "&amp;action=pre_install&amp;mod_path=$short_path",
 				'U_DELETE'	=> $this->u_action . "&amp;action=pre_delete_mod&amp;mod_path=$short_path",
@@ -492,7 +492,7 @@ class acp_mods
 
 			$template->assign_vars(array(
 				'VERSION_WARNING'	=> $version_warnig,
-				'S_PHPBB_VESION'	=> true,
+				'S_PHPBB_VERSION'	=> true,
 			));
 		}
 
@@ -1790,7 +1790,7 @@ class acp_mods
 
 			$template->assign_vars(array(
 				'VERSION_WARNING'	=> $version_warnig,
-				'S_PHPBB_VESION'	=> true,
+				'S_PHPBB_VERSION'	=> true,
 			));
 		}
 

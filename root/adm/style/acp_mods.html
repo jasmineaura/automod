@@ -68,7 +68,7 @@
 	<!-- BEGIN uninstalled -->
 	<tr>
 		<td><strong>{uninstalled.MOD_NAME}</strong></td>
-		<td><!-- IF uninstalled.S_PHPBB_VESION --><span style="font-weight: bold; color: red;">{uninstalled.PHPBB_VERSION}</span><!-- ELSE -->{uninstalled.PHPBB_VERSION}<!-- ENDIF --></td>
+		<td><!-- IF uninstalled.S_PHPBB_VERSION --><span style="font-weight: bold; color: red;">{uninstalled.PHPBB_VERSION}</span><!-- ELSE -->{uninstalled.PHPBB_VERSION}<!-- ENDIF --></td>
 		<td style="text-align: center;"><a href="{uninstalled.U_DETAILS}">{L_DETAILS}</a></td>
 		<td style="text-align: center;"><a href="{uninstalled.U_INSTALL}">{L_INSTALL}</a>&nbsp;|&nbsp;<a href="{uninstalled.U_DELETE}">{L_DELETE}</a></td>
 	</tr>
@@ -161,7 +161,7 @@
 
 	<p>{L_MOD_DETAILS_EXPLAIN}</p>
 
-	<!-- IF S_PHPBB_VESION -->
+	<!-- IF S_PHPBB_VERSION -->
 		<div class="errorbox">
 			<p>{VERSION_WARNING}</p>
 		</div>
@@ -330,7 +330,7 @@
 		<input class="button1" type="submit" name="install" value="{L_INSTALL}" />
 	</fieldset>
 
-	<!-- IF S_PHPBB_VESION -->
+	<!-- IF S_PHPBB_VERSION -->
 		<div class="errorbox">
 			<p>{VERSION_WARNING}</p>
 		</div>
